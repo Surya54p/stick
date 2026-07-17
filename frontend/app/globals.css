@@ -1,0 +1,31 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary-base: #09090b;
+  --color-secondary-panel: #18181b;
+  --color-secondary-border: #27272a;
+  --color-secondary-text: #a1a1aa;
+  --color-accent-orange: #ff6b00;
+  --color-accent-orange-hover: #e55a00;
+  
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+:root {
+  --background: #09090b;
+  --foreground: #f4f4f5;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), sans-serif;
+  overflow-x: hidden;
+}
+
+/* Sharp focus outlines */
+*:focus-visible {
+  outline: 2px solid var(--color-accent-orange);
+  outline-offset: 2px;
+}
