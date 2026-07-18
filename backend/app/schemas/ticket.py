@@ -21,8 +21,11 @@ class TicketUpdate(BaseModel):
 class TicketInDBBase(TicketBase):
     id: UUID
     workspace_id: UUID
+    number: int
     creator_id: UUID | None = None
     assignee_id: UUID | None = None
+    aduan_service_id: UUID | None = None
+    creator_email: str | None = None
     created_at: datetime
     updated_at: datetime
 

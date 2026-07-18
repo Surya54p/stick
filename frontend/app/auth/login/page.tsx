@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Ticket, Mail, Lock, Eye, EyeOff, ArrowLeft } from "lucide-react";
+import { apiRequest } from "@/lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -18,19 +19,29 @@ export default function LoginPage() {
     setError("");
     setIsLoading(true);
 
-    // Simple simulation for landing page dummy
-    setTimeout(() => {
-      setIsLoading(false);
-      if (email === "demo@stick.co" && password === "demo123") {
-        // Successful login mock
-        alert("Login berhasil (Demo)!");
-        // We'll redirect them to dashboard later, let's redirect to home for now or dashboard mock
-        router.push("/dashboard");
+    try {
+      const data = await apiRequest("/auth/login", "POST", { email, password });
+      
+      // Store credentials and workspaces in localStorage
+      localStorage.setItem("token", data.access_token);
+      localStorage.setItem("user", JSON.stringify(data.user));
+      localStorage.setItem("workspaces", JSON.stringify(data.workspaces));
+      
+      // Set default workspace
+      if (data.workspaces && data.workspaces.length > 0) {
+        localStorage.setItem("current_workspace", JSON.stringify(data.workspaces[0]));
       } else {
-        setError("Email atau kata sandi salah. Gunakan demo@stick.co / demo123");
+        localStorage.removeItem("current_workspace");
       }
-    }, 1200);
+
+      router.push("/dashboard");
+    } catch (err: any) {
+      setError(err.message || "Email atau kata sandi salah. Silakan coba lagi.");
+    } finally {
+      setIsLoading(false);
+    }
   };
+
 
   return (
     <div className="min-h-[80vh] flex flex-col justify-center items-center px-4 bg-primary-base">

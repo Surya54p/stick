@@ -18,6 +18,7 @@ class Workspace(Base):
     tickets = relationship("Ticket", back_populates="workspace", cascade="all, delete-orphan")
     invitations = relationship("WorkspaceInvitation", back_populates="workspace", cascade="all, delete-orphan")
     share_tokens = relationship("WorkspaceShareToken", back_populates="workspace", cascade="all, delete-orphan")
+    aduan_services = relationship("AduanService", back_populates="workspace", cascade="all, delete-orphan")
 
 class WorkspaceInvitation(Base):
     __tablename__ = "workspace_invitations"

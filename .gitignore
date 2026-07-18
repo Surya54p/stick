@@ -34,4 +34,5 @@ yarn-error.log*
 
 # Markdown files in root
 /*.md
-
+!README.md
+seed.py

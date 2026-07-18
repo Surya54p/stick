@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Ticket, Mail, Lock, User, Globe, ArrowLeft } from "lucide-react";
+import { apiRequest } from "@/lib/api";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -37,13 +38,24 @@ export default function RegisterPage() {
       return;
     }
 
-    // Mock register
-    setTimeout(() => {
-      setIsLoading(false);
-      alert(`Workspace "${workspaceName}" (${workspaceSlug}.stick.co) berhasil didaftarkan (Demo Mode)!`);
+    try {
+      const data = await apiRequest("/auth/register", "POST", {
+        full_name: fullName,
+        email,
+        workspace_name: workspaceName,
+        workspace_slug: workspaceSlug,
+        password
+      });
+
+      alert(`Workspace "${data.workspace.name}" berhasil dibuat! Silakan masuk.`);
       router.push("/auth/login");
-    }, 1500);
+    } catch (err: any) {
+      setError(err.message || "Gagal mendaftarkan workspace.");
+    } finally {
+      setIsLoading(false);
+    }
   };
+
 
   return (
     <div className="min-h-[90vh] flex flex-col justify-center items-center px-4 py-8 bg-primary-base">

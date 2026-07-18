@@ -7,6 +7,7 @@ from app.schemas.workspace import (
 )
 from app.schemas.ticket import Ticket, TicketCreate, TicketUpdate
 from app.schemas.comment import Comment, CommentCreate
+from app.schemas.aduan import AduanService, AduanServiceCreate, AduanServiceUpdate
 
 __all__ = [
     "User", "UserCreate", "UserUpdate", "Token", "TokenPayload", "UserRegister", "UserLogin",
@@ -15,7 +16,8 @@ __all__ = [
     "WorkspaceInvitation", "WorkspaceInvitationCreate", "WorkspaceInvitationUpdate",
     "WorkspaceShareToken", "WorkspaceShareTokenCreate",
     "Ticket", "TicketCreate", "TicketUpdate",
-    "Comment", "CommentCreate"
+    "Comment", "CommentCreate",
+    "AduanService", "AduanServiceCreate", "AduanServiceUpdate"
 ]
 
 

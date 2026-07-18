@@ -18,10 +18,13 @@ services:
       dockerfile: Dockerfile
     container_name: stick_backend
     restart: always
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     env_file:
       - .env.local
     ports:
       - "8000:8000"
+    volumes:
+      - ./backend:/app
     depends_on:
       - db
 
@@ -33,8 +36,13 @@ services:
         - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
     container_name: stick_frontend
     restart: always
+    command: npm run dev
     ports:
       - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
     env_file:
       - .env.local
     depends_on:

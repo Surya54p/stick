@@ -11,9 +11,9 @@ from app.schemas.ticket import Ticket as TicketSchema, TicketCreate, TicketUpdat
 
 router = APIRouter()
 
-@router.get("/workspaces/{slug}/tickets", response_model=List[TicketSchema])
+@router.get("/workspaces/{workspace_slug}/tickets", response_model=List[TicketSchema])
 def list_tickets(
-    slug: str,
+    workspace_slug: str,
     db: Session = Depends(get_db),
     workspace: Workspace = Depends(deps.verify_workspace_read_access),
     current_user: Optional[User] = Depends(deps.OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False))
@@ -51,9 +51,9 @@ def list_tickets(
         
     return query.all()
 
-@router.get("/workspaces/{slug}/tickets/{ticket_id}", response_model=TicketSchema)
+@router.get("/workspaces/{workspace_slug}/tickets/{ticket_id}", response_model=TicketSchema)
 def get_ticket(
-    slug: str,
+    workspace_slug: str,
     ticket_id: str,
     db: Session = Depends(get_db),
     workspace: Workspace = Depends(deps.verify_workspace_read_access),
@@ -86,17 +86,25 @@ def get_ticket(
 
     return ticket
 
-@router.post("/workspaces/{slug}/tickets", response_model=TicketSchema)
+@router.post("/workspaces/{workspace_slug}/tickets", response_model=TicketSchema)
 def create_ticket(
-    slug: str,
+    workspace_slug: str,
     *,
     db: Session = Depends(get_db),
     ticket_in: TicketCreate,
     current_member: WorkspaceMember = Depends(deps.get_current_workspace_member),
     current_user: User = Depends(deps.get_current_active_user)
 ) -> Any:
+    # Get max ticket number in this workspace
+    from sqlalchemy import func
+    max_num = db.query(func.max(Ticket.number)).filter(
+        Ticket.workspace_id == current_member.workspace_id
+    ).scalar() or 0
+    new_number = max_num + 1
+
     db_ticket = Ticket(
         workspace_id=current_member.workspace_id,
+        number=new_number,
         title=ticket_in.title,
         description=ticket_in.description,
         status=ticket_in.status,
@@ -109,9 +117,10 @@ def create_ticket(
     db.refresh(db_ticket)
     return db_ticket
 
-@router.put("/workspaces/{slug}/tickets/{ticket_id}", response_model=TicketSchema)
+
+@router.put("/workspaces/{workspace_slug}/tickets/{ticket_id}", response_model=TicketSchema)
 def update_ticket(
-    slug: str,
+    workspace_slug: str,
     ticket_id: str,
     *,
     db: Session = Depends(get_db),
@@ -133,9 +142,10 @@ def update_ticket(
             raise HTTPException(status_code=403, detail="Customers cannot change the ticket assignee.")
         if ticket_in.priority is not None and ticket_in.priority != ticket.priority:
             raise HTTPException(status_code=403, detail="Customers cannot change the ticket priority.")
-        if ticket_in.status is not None and ticket_in.status not in ["Closed", ticket.status]:
-            # Customers are only allowed to Close their ticket
-            raise HTTPException(status_code=403, detail="Customers can only close their tickets.")
+        if ticket_in.status is not None and ticket_in.status not in ["Closed", "Open", ticket.status]:
+            # Customers are only allowed to Open or Close their ticket
+            raise HTTPException(status_code=403, detail="Customers can only set status to Open or Closed.")
+
 
     # Apply updates
     update_data = ticket_in.model_dump(exclude_unset=True)
@@ -146,9 +156,9 @@ def update_ticket(
     db.refresh(ticket)
     return ticket
 
-@router.delete("/workspaces/{slug}/tickets/{ticket_id}", response_model=Any)
+@router.delete("/workspaces/{workspace_slug}/tickets/{ticket_id}", response_model=Any)
 def delete_ticket(
-    slug: str,
+    workspace_slug: str,
     ticket_id: str,
     db: Session = Depends(get_db),
     current_member: WorkspaceMember = Depends(deps.get_current_workspace_member)

@@ -11,6 +11,7 @@ from app.models.workspace import Workspace, WorkspaceInvitation, WorkspaceShareT
 from app.schemas.workspace import (
     Workspace as WorkspaceSchema,
     WorkspaceCreate,
+    WorkspaceUpdate,
     WorkspaceInvitation as WorkspaceInvitationSchema,
     WorkspaceInvitationCreate,
     WorkspaceShareToken as WorkspaceShareTokenSchema,
@@ -249,3 +250,73 @@ def list_share_tokens(
     return db.query(WorkspaceShareToken).filter(
         WorkspaceShareToken.workspace_id == current_member.workspace_id
     ).all()
+
+@router.put("/{slug}", response_model=WorkspaceSchema)
+def update_workspace(
+    slug: str,
+    *,
+    db: Session = Depends(get_db),
+    workspace_in: WorkspaceUpdate,
+    current_member: WorkspaceMember = Depends(deps.get_current_workspace_member)
+) -> Any:
+    # Ensure current user is Admin of workspace
+    if current_member.role != "Admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Only workspace Admins can modify settings."
+        )
+    
+    workspace = current_member.workspace
+    
+    # If changing slug, verify uniqueness
+    if workspace_in.slug is not None and workspace_in.slug != workspace.slug:
+        existing = db.query(Workspace).filter(Workspace.slug == workspace_in.slug).first()
+        if existing:
+            raise HTTPException(
+                status_code=400,
+                detail="Workspace with this slug already exists."
+            )
+            
+    update_data = workspace_in.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(workspace, field, value)
+        
+    db.commit()
+    db.refresh(workspace)
+    return workspace
+
+@router.delete("/{slug}", response_model=Any)
+def delete_workspace(
+    slug: str,
+    db: Session = Depends(get_db),
+    current_member: WorkspaceMember = Depends(deps.get_current_workspace_member)
+) -> Any:
+    # Ensure current user is Admin of workspace
+    if current_member.role != "Admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Only workspace Admins can delete the workspace."
+        )
+    
+    workspace = current_member.workspace
+    db.delete(workspace)
+    db.commit()
+    return {"status": "success", "message": "Workspace deleted successfully"}
+
+@router.get("/{slug}/members", response_model=List[Any])
+def list_workspace_members(
+    slug: str,
+    db: Session = Depends(get_db),
+    current_member: WorkspaceMember = Depends(deps.get_current_workspace_member)
+) -> Any:
+    members = db.query(WorkspaceMember).filter(WorkspaceMember.workspace_id == current_member.workspace_id).all()
+    result = []
+    for m in members:
+        result.append({
+            "id": str(m.user_id),
+            "name": m.user.full_name or m.user.email,
+            "email": m.user.email,
+            "role": m.role,
+            "status": "Active"
+        })
+    return result

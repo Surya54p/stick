@@ -27,14 +27,14 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
       icon: <LayoutDashboard className="h-4 w-4" />
     },
     {
+      name: "Layanan Aduan",
+      href: "/dashboard/aduan",
+      icon: <Layers className="h-4 w-4" />
+    },
+    {
       name: "Daftar Tiket",
       href: "/dashboard/tickets",
       icon: <KanbanSquare className="h-4 w-4" />
-    },
-    {
-      name: "Anggota Tim",
-      href: "/dashboard/members",
-      icon: <Users className="h-4 w-4" />
     },
     {
       name: "Pengaturan",
