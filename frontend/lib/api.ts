@@ -24,7 +24,17 @@ export async function apiRequest(path: string, method: string = "GET", body: any
   
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.detail || "Terjadi kesalahan pada server");
+    let errMsg = "Terjadi kesalahan pada server";
+    if (errorData.detail) {
+      if (typeof errorData.detail === "string") {
+        errMsg = errorData.detail;
+      } else if (Array.isArray(errorData.detail)) {
+        errMsg = errorData.detail.map((err: any) => err.msg || JSON.stringify(err)).join(", ");
+      } else if (typeof errorData.detail === "object") {
+        errMsg = JSON.stringify(errorData.detail);
+      }
+    }
+    throw new Error(errMsg);
   }
   
   return response.json();

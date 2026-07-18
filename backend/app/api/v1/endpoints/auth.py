@@ -8,8 +8,9 @@ from app.core.security import get_password_hash, verify_password, create_access_
 from app.core.config import settings
 from app.models.user import User, WorkspaceMember
 from app.models.workspace import Workspace
-from app.schemas.user import Token, UserRegister, UserLogin, User as UserSchema
+from app.schemas.user import Token, UserRegister, UserLogin, UserUpdate, User as UserSchema
 from app.schemas.workspace import Workspace as WorkspaceSchema
+from app.api import deps
 
 router = APIRouter()
 
@@ -129,4 +130,38 @@ def login(
             "full_name": user.full_name
         },
         "workspaces": user_workspaces
+    }
+
+@router.put("/me", response_model=Any)
+def update_user_me(
+    *,
+    db: Session = Depends(get_db),
+    user_in: UserUpdate,
+    current_user: User = Depends(deps.get_current_active_user)
+) -> Any:
+    # Update fields
+    if user_in.full_name is not None:
+        current_user.full_name = user_in.full_name
+        
+    if user_in.email is not None and user_in.email != current_user.email:
+        # Check if email is already taken
+        existing_user = db.query(User).filter(User.email == user_in.email).first()
+        if existing_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already registered",
+            )
+        current_user.email = user_in.email
+        
+    if user_in.password is not None:
+        current_user.hashed_password = get_password_hash(user_in.password)
+        
+    db.add(current_user)
+    db.commit()
+    db.refresh(current_user)
+    
+    return {
+        "id": current_user.id,
+        "email": current_user.email,
+        "full_name": current_user.full_name
     }

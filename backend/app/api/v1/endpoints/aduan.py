@@ -50,7 +50,9 @@ def create_aduan_service(
         name=service_in.name,
         slug=service_in.slug,
         description=service_in.description,
-        is_open=service_in.is_open
+        is_open=service_in.is_open,
+        fields_schema=service_in.fields_schema,
+        require_login=service_in.require_login
     )
     db.add(db_service)
     db.commit()
@@ -172,10 +174,11 @@ def delete_aduan_service(
 # ----------------- PUBLIC ENDPOINTS -----------------
 
 class PublicComplaintSubmit(BaseModel):
-    email: str
-    title: str
+    email: str | None = None
+    title: str | None = None
     priority: str = "Medium" # Low | Medium | High | Urgent
-    description: str
+    description: str | None = None
+    custom_responses: dict[str, Any] | None = None
 
 @router.get("/public/aduan-services/{slug}", response_model=AduanServicePublic)
 def get_public_aduan_service(
@@ -192,7 +195,8 @@ def submit_public_complaint(
     slug: str,
     *,
     db: Session = Depends(get_db),
-    complaint_in: PublicComplaintSubmit
+    complaint_in: PublicComplaintSubmit,
+    current_user_token: Optional[str] = Depends(deps.OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False))
 ) -> Any:
     service = db.query(AduanService).filter(AduanService.slug == slug).first()
     if not service:
@@ -204,23 +208,69 @@ def submit_public_complaint(
             detail="This complaint service is currently closed."
         )
 
+    # Decode authenticated user if token is present
+    logged_in_user = None
+    if current_user_token:
+        from jose import jwt
+        from app.core.config import settings
+        from app.schemas.user import TokenPayload
+        try:
+            payload = jwt.decode(current_user_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+            token_data = TokenPayload(**payload)
+            logged_in_user = db.query(User).filter(User.id == token_data.sub).first()
+        except Exception:
+            pass
+
+    # Enforce authentication if required by the complaint service
+    if service.require_login and not logged_in_user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication is required to submit complaints on this service."
+        )
+
     # Get max ticket number in this workspace
     max_num = db.query(func.max(Ticket.number)).filter(
         Ticket.workspace_id == service.workspace_id
     ).scalar() or 0
     new_number = max_num + 1
 
+    # Auto-generate title and description from custom_responses if not provided
+    final_title = complaint_in.title
+    final_description = complaint_in.description
+    final_email = logged_in_user.email if logged_in_user else complaint_in.email
+
+    if not final_title:
+        if complaint_in.custom_responses:
+            # Use first non-empty text response as title
+            for val in complaint_in.custom_responses.values():
+                if isinstance(val, str) and val.strip() and not val.startswith("data:"):
+                    final_title = val.strip()[:120]
+                    break
+        if not final_title:
+            final_title = f"Aduan #{new_number} - {service.name}"
+
+    if not final_description and complaint_in.custom_responses:
+        # Build description summary from all custom responses
+        parts = []
+        for key, val in complaint_in.custom_responses.items():
+            if isinstance(val, str) and not val.startswith("data:"):
+                parts.append(val)
+            elif isinstance(val, list):
+                parts.append(", ".join(val))
+        final_description = "\n".join(parts) if parts else None
+
     db_ticket = Ticket(
         workspace_id=service.workspace_id,
         number=new_number,
-        title=complaint_in.title,
-        description=complaint_in.description,
+        title=final_title,
+        description=final_description,
         status="Open",
         priority=complaint_in.priority,
-        creator_id=None,
+        creator_id=logged_in_user.id if logged_in_user else None,
         assignee_id=None,
         aduan_service_id=service.id,
-        creator_email=complaint_in.email
+        creator_email=final_email,
+        custom_responses=complaint_in.custom_responses
     )
     db.add(db_ticket)
     db.commit()

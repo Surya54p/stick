@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, ForeignKey, DateTime, Boolean
+from sqlalchemy import Column, String, ForeignKey, DateTime, Boolean, JSON
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -12,6 +12,7 @@ class Workspace(Base):
     name = Column(String, nullable=False)
     slug = Column(String, unique=True, index=True, nullable=False)
     owner_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    status_order = Column(JSON, nullable=True)
 
     owner = relationship("User", foreign_keys=[owner_id])
     members = relationship("WorkspaceMember", back_populates="workspace", cascade="all, delete-orphan")
