@@ -5,6 +5,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Ticket, Menu, Bell, User, Search } from "lucide-react";
 import WorkspaceSwitcher from "./WorkspaceSwitcher";
+import NotificationDropdown from "./NotificationDropdown";
 import { apiRequest } from "@/lib/api";
 
 interface HeadbarProps {
@@ -130,13 +131,10 @@ export default function Headbar({ sidebarOpen, setSidebarOpen }: HeadbarProps) {
         <div className="flex items-center gap-4">
           
           {/* Notifications */}
-          <button className="p-1.5 rounded text-secondary-text hover:text-zinc-100 hover:bg-primary-base/50 transition-colors relative">
-            <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-accent-orange" />
-            <Bell className="h-4.5 w-4.5" />
-          </button>
+          <NotificationDropdown />
  
-          {/* Profile Dropdown */}
-          <div className="flex items-center gap-2.5 border-l border-secondary-border pl-4">
+          {/* Profile Section (Link to profile page) */}
+          <Link href="/dashboard/profile" className="flex items-center gap-2.5 border-l border-secondary-border pl-4 hover:opacity-80 transition-opacity cursor-pointer">
             <div className="w-7 h-7 rounded bg-accent-orange/10 border border-accent-orange/30 text-accent-orange flex items-center justify-center font-bold text-xs">
               {userInitials}
             </div>
@@ -144,7 +142,7 @@ export default function Headbar({ sidebarOpen, setSidebarOpen }: HeadbarProps) {
               <span className="text-[11px] font-bold text-zinc-200">{userName}</span>
               <span className="text-[9px] text-zinc-500 font-mono">{userRole}</span>
             </div>
-          </div>
+          </Link>
 
         </div>
 

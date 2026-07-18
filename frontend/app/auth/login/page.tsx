@@ -1,13 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useState, Suspense } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Ticket, Mail, Lock, Eye, EyeOff, ArrowLeft } from "lucide-react";
 import { apiRequest } from "@/lib/api";
 
-export default function LoginPage() {
+function LoginContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  
+  // Read redirect parameter, default to /dashboard
+  const redirectPath = searchParams.get("redirect") || "/dashboard";
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -34,14 +39,14 @@ export default function LoginPage() {
         localStorage.removeItem("current_workspace");
       }
 
-      router.push("/dashboard");
+      // Redirect to the target path instead of hardcoded /dashboard
+      router.push(redirectPath);
     } catch (err: any) {
       setError(err.message || "Email atau kata sandi salah. Silakan coba lagi.");
     } finally {
       setIsLoading(false);
     }
   };
-
 
   return (
     <div className="min-h-[80vh] flex flex-col justify-center items-center px-4 bg-primary-base">
@@ -151,12 +156,28 @@ export default function LoginPage() {
         {/* Footer Link */}
         <div className="text-center border-t border-secondary-border/50 pt-4 text-xs text-secondary-text">
           Belum memiliki workspace?{" "}
-          <Link href="/auth/register" className="font-semibold text-accent-orange hover:underline">
+          <Link 
+            href={`/auth/register${redirectPath ? '?redirect=' + encodeURIComponent(redirectPath) : ''}`} 
+            className="font-semibold text-accent-orange hover:underline"
+          >
             Buat Baru
           </Link>
         </div>
 
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-primary-base flex flex-col items-center justify-center gap-3 text-zinc-300 font-sans">
+        <span className="w-8 h-8 border-2 border-accent-orange border-t-transparent rounded-full animate-spin" />
+        <span className="text-xs font-semibold">Memuat login...</span>
+      </div>
+    }>
+      <LoginContent />
+    </Suspense>
   );
 }

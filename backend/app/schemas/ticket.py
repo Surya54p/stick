@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from typing import Any
 from uuid import UUID
 from datetime import datetime
 
@@ -10,6 +11,7 @@ class TicketBase(BaseModel):
 
 class TicketCreate(TicketBase):
     assignee_id: UUID | None = None
+    custom_responses: dict[str, Any] | None = None
 
 class TicketUpdate(BaseModel):
     title: str | None = None
@@ -17,6 +19,8 @@ class TicketUpdate(BaseModel):
     status: str | None = None
     priority: str | None = None
     assignee_id: UUID | None = None
+    position: int | None = None
+    custom_responses: dict[str, Any] | None = None
 
 class TicketInDBBase(TicketBase):
     id: UUID
@@ -26,6 +30,10 @@ class TicketInDBBase(TicketBase):
     assignee_id: UUID | None = None
     aduan_service_id: UUID | None = None
     creator_email: str | None = None
+    creator_name: str | None = None
+    assignee_name: str | None = None
+    custom_responses: dict[str, Any] | None = None
+    position: int
     created_at: datetime
     updated_at: datetime
 

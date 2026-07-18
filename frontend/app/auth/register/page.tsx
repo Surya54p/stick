@@ -1,13 +1,18 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Ticket, Mail, Lock, User, Globe, ArrowLeft } from "lucide-react";
 import { apiRequest } from "@/lib/api";
 
-export default function RegisterPage() {
+function RegisterContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  
+  // Read redirect parameter
+  const redirectPath = searchParams.get("redirect") || "";
+
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [workspaceName, setWorkspaceName] = useState("");
@@ -48,14 +53,16 @@ export default function RegisterPage() {
       });
 
       alert(`Workspace "${data.workspace.name}" berhasil dibuat! Silakan masuk.`);
-      router.push("/auth/login");
+      
+      // Pass redirect parameter along to the login screen
+      const loginUrl = `/auth/login${redirectPath ? '?redirect=' + encodeURIComponent(redirectPath) : ''}`;
+      router.push(loginUrl);
     } catch (err: any) {
       setError(err.message || "Gagal mendaftarkan workspace.");
     } finally {
       setIsLoading(false);
     }
   };
-
 
   return (
     <div className="min-h-[90vh] flex flex-col justify-center items-center px-4 py-8 bg-primary-base">
@@ -201,12 +208,28 @@ export default function RegisterPage() {
         {/* Footer Link */}
         <div className="text-center border-t border-secondary-border/50 pt-4 text-xs text-secondary-text">
           Sudah memiliki akun?{" "}
-          <Link href="/auth/login" className="font-semibold text-accent-orange hover:underline">
+          <Link 
+            href={`/auth/login${redirectPath ? '?redirect=' + encodeURIComponent(redirectPath) : ''}`} 
+            className="font-semibold text-accent-orange hover:underline"
+          >
             Masuk ke Workspace
           </Link>
         </div>
 
       </div>
     </div>
+  );
+}
+
+export default function RegisterPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-primary-base flex flex-col items-center justify-center gap-3 text-zinc-300 font-sans">
+        <span className="w-8 h-8 border-2 border-accent-orange border-t-transparent rounded-full animate-spin" />
+        <span className="text-xs font-semibold">Memuat register...</span>
+      </div>
+    }>
+      <RegisterContent />
+    </Suspense>
   );
 }

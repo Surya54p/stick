@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, Text, ForeignKey, DateTime, Boolean
+from sqlalchemy import Column, String, Text, ForeignKey, DateTime, Boolean, JSON
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -14,6 +14,8 @@ class AduanService(Base):
     slug = Column(String, unique=True, index=True, nullable=False)
     description = Column(Text, nullable=True)
     is_open = Column(Boolean, default=True, nullable=False)
+    fields_schema = Column(JSON, nullable=True)  # Custom form fields schema
+    require_login = Column(Boolean, default=False, nullable=False)
     
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)

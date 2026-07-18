@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { apiRequest } from "@/lib/api";
+import ReusableTableComponent from "@/components/dashboard/ReusableTableComponent";
 import { 
   Play, 
   Plus, 
@@ -32,37 +33,56 @@ interface Ticket {
   id: string;
   rawId: string;
   title: string;
+  description: string;
   creator: string;
   assignee: string;
+  assigneeId: string | null;
   status: string;
   priority: "Low" | "Medium" | "High" | "Urgent";
   number: number;
+  aduanServiceId: string | null;
+  createdAt: string;
+  date: string;
 }
 
 export default function TicketsKanbanPage() {
   const router = useRouter();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [activeTab, setActiveTab] = useState("View 1"); // View 1 is List
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
+  
+  // Workspace and views states
   const [currentWorkspace, setCurrentWorkspace] = useState<any>(null);
+  const [activeTab, setActiveTab] = useState("View 1"); // View 1: List, View 2: Board, View 3: Roadmap
+  const [orderedStatuses, setOrderedStatuses] = useState<string[]>([]);
   const [customStatuses, setCustomStatuses] = useState<string[]>([]);
+  const [workspaceMembers, setWorkspaceMembers] = useState<any[]>([]);
+  
   const [draggedTicketId, setDraggedTicketId] = useState<string | null>(null);
   const [dragOverTicketId, setDragOverTicketId] = useState<string | null>(null);
-
-  // Complaint services states
+  const [draggedColStatus, setDraggedColStatus] = useState<string | null>(null);
+  const [dragOverColStatus, setDragOverColStatus] = useState<string | null>(null);
   const [aduanServices, setAduanServices] = useState<any[]>([]);
   const [selectedAduanId, setSelectedAduanId] = useState<string>("all");
   const [isAduanDropdownOpen, setIsAduanDropdownOpen] = useState(false);
-  
-  // Custom status input
-  const [newStatusName, setNewStatusName] = useState("");
   const [isAddingStatus, setIsAddingStatus] = useState(false);
+  const [dragOverColForCard, setDragOverColForCard] = useState<string | null>(null);
+  const [newStatusName, setNewStatusName] = useState("");
   
   // Interactive column ticket creators
   const [showAddInColumn, setShowAddInColumn] = useState<string | null>(null);
   const [columnNewTitle, setColumnNewTitle] = useState("");
   const [error, setError] = useState<string | null>(null);
+  
+  // Custom container editing states
+  const [activeColMenu, setActiveColMenu] = useState<string | null>(null);
+  const [editingColStatus, setEditingColStatus] = useState<string | null>(null);
+  const [editingColName, setEditingColName] = useState("");
+  const [editingColDesc, setEditingColDesc] = useState("");
+  const [editingColColor, setEditingColColor] = useState("#8B5CF6");
+  const [columnsMeta, setColumnsMeta] = useState<Record<string, { label: string; desc: string; color: string }>>({});
+  const [isLoading, setIsLoading] = useState(false);
+  const columnsContainerRef = useRef<HTMLDivElement>(null);
 
   const fetchTickets = async (slug: string) => {
     setError(null);
@@ -72,12 +92,16 @@ export default function TicketsKanbanPage() {
         id: `STK-${t.id.substring(0, 4).toUpperCase()}`,
         rawId: t.id,
         title: t.title,
-        creator: "Anggota Workspace",
-        assignee: "Belum Ditugaskan",
+        description: t.description || "",
+        creator: t.creator_name || t.creator_email || "Anonim",
+        assignee: t.assignee_name || "Belum Ditugaskan",
+        assigneeId: t.assignee_id || null,
         status: t.status,
         priority: t.priority,
         number: t.number,
-        aduanServiceId: t.aduan_service_id || null
+        aduanServiceId: t.aduan_service_id || null,
+        createdAt: t.created_at,
+        date: new Date(t.created_at).toLocaleDateString("id-ID")
       }));
       setTickets(mapped);
     } catch (err: any) {
@@ -91,6 +115,26 @@ export default function TicketsKanbanPage() {
       setAduanServices(data);
     } catch (err: any) {
       console.error("Gagal memuat layanan aduan:", err.message);
+    }
+  };
+
+  const fetchWorkspaceDetail = async (slug: string) => {
+    try {
+      const data = await apiRequest(`/workspaces/${slug}`);
+      if (data.status_order) {
+        setOrderedStatuses(data.status_order);
+      }
+    } catch (err: any) {
+      console.error("Gagal memuat detail workspace:", err.message);
+    }
+  };
+
+  const fetchWorkspaceMembers = async (slug: string) => {
+    try {
+      const data = await apiRequest(`/workspaces/${slug}/members`);
+      setWorkspaceMembers(data);
+    } catch (err: any) {
+      console.error("Gagal memuat anggota workspace:", err.message);
     }
   };
 
@@ -116,13 +160,46 @@ export default function TicketsKanbanPage() {
       setCurrentWorkspace(parsedWs);
       fetchTickets(parsedWs.slug);
       fetchAduanServices(parsedWs.slug);
+      fetchWorkspaceDetail(parsedWs.slug);
+      fetchWorkspaceMembers(parsedWs.slug);
     } else {
       router.push("/auth/login");
     }
   }, []);
 
+  // Load custom status column metadata from localStorage
+  useEffect(() => {
+    if (currentWorkspace) {
+      const metaStr = localStorage.getItem(`workspace_status_meta_${currentWorkspace.slug}`);
+      if (metaStr) {
+        try {
+          setColumnsMeta(JSON.parse(metaStr));
+        } catch (e) {
+          console.error("Gagal memuat metadata kolom:", e);
+        }
+      }
+    }
+  }, [currentWorkspace]);
+
+  // Synchronize orderedStatuses with custom and ticket statuses
+  useEffect(() => {
+    const defaultCols = ["Open", "In Progress", "Closed"];
+    const allStatuses = Array.from(new Set([...defaultCols, ...customStatuses, ...tickets.map(t => t.status)]));
+    
+    setOrderedStatuses(prev => {
+      // Add any new statuses that aren't in prev, but DO NOT delete existing columns
+      const newStatuses = allStatuses.filter(s => !prev.includes(s));
+      
+      if (newStatuses.length > 0 || prev.length === 0) {
+        return [...prev, ...newStatuses];
+      }
+      return prev;
+    });
+  }, [tickets, customStatuses]);
+
   // Drag and Drop States
   const handleDragStart = (e: React.DragEvent, id: string) => {
+    e.stopPropagation();
     e.dataTransfer.setData("text/plain", id);
     setDraggedTicketId(id);
   };
@@ -130,6 +207,7 @@ export default function TicketsKanbanPage() {
   const handleDragEnd = () => {
     setDraggedTicketId(null);
     setDragOverTicketId(null);
+    setDragOverColForCard(null);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -163,10 +241,16 @@ export default function TicketsKanbanPage() {
     }
 
     if (ticketToUpdate.status !== targetStatus) {
-      setTickets(prev => prev.map(t => t.id === id ? { ...t, status: targetStatus } : t));
+      const nextTickets = tickets.map(t => t.id === id ? { ...t, status: targetStatus } : t);
+      setTickets(nextTickets);
+      
+      const targetStatusTickets = nextTickets.filter(t => t.status === targetStatus);
+      const ticketIds = targetStatusTickets.map(t => t.rawId);
+
       try {
-        await apiRequest(`/workspaces/${currentWorkspace.slug}/tickets/${ticketToUpdate.rawId}`, "PUT", {
-          status: targetStatus
+        await apiRequest(`/workspaces/${currentWorkspace.slug}/tickets/reorder`, "PUT", {
+          status: targetStatus,
+          ticket_ids: ticketIds
         });
       } catch (err: any) {
         alert("Gagal memindahkan tiket: " + err.message);
@@ -176,6 +260,7 @@ export default function TicketsKanbanPage() {
 
     setDraggedTicketId(null);
     setDragOverTicketId(null);
+    setDragOverColForCard(null);
   };
 
   const handleDropOnCard = async (e: React.DragEvent, targetCardId: string) => {
@@ -190,19 +275,20 @@ export default function TicketsKanbanPage() {
 
     const targetStatus = targetTicket.status;
 
-    setTickets(prev => {
-      const remaining = prev.filter(t => t.id !== id);
-      const targetIdx = remaining.findIndex(t => t.id === targetCardId);
-      const updatedDragged = { ...draggedTicket, status: targetStatus };
-      
-      const result = [...remaining];
-      result.splice(targetIdx, 0, updatedDragged);
-      return result;
-    });
+    const nextTickets = [...tickets.filter(t => t.id !== id)];
+    const targetIdx = nextTickets.findIndex(t => t.id === targetCardId);
+    const updatedDragged = { ...draggedTicket, status: targetStatus };
+    nextTickets.splice(targetIdx, 0, updatedDragged);
+    
+    setTickets(nextTickets);
+
+    const targetStatusTickets = nextTickets.filter(t => t.status === targetStatus);
+    const ticketIds = targetStatusTickets.map(t => t.rawId);
 
     try {
-      await apiRequest(`/workspaces/${currentWorkspace.slug}/tickets/${draggedTicket.rawId}`, "PUT", {
-        status: targetStatus
+      await apiRequest(`/workspaces/${currentWorkspace.slug}/tickets/reorder`, "PUT", {
+        status: targetStatus,
+        ticket_ids: ticketIds
       });
     } catch (err: any) {
       alert("Gagal memindahkan tiket: " + err.message);
@@ -211,6 +297,69 @@ export default function TicketsKanbanPage() {
 
     setDraggedTicketId(null);
     setDragOverTicketId(null);
+    setDragOverColForCard(null);
+  };
+
+  const handleOpenAddContainer = () => {
+    setActiveTab("View 2");
+    setIsAddingStatus(true);
+    setTimeout(() => {
+      if (columnsContainerRef.current) {
+        columnsContainerRef.current.scrollTo({
+          left: columnsContainerRef.current.scrollWidth,
+          behavior: "smooth"
+        });
+      }
+    }, 100);
+  };
+
+  // Column Drag and Drop Handlers
+  const handleDragStartCol = (e: React.DragEvent, status: string) => {
+    e.dataTransfer.setData("text/column", status);
+    setDraggedColStatus(status);
+  };
+
+  const handleDragEndCol = () => {
+    setDraggedColStatus(null);
+    setDragOverColStatus(null);
+  };
+
+  const handleDragOverCol = (e: React.DragEvent, status: string) => {
+    e.preventDefault();
+    if (draggedColStatus && draggedColStatus !== status) {
+      setDragOverColStatus(status);
+    }
+  };
+
+  const handleDragLeaveCol = () => {
+    setDragOverColStatus(null);
+  };
+
+  const handleDropCol = (e: React.DragEvent, targetStatus: string) => {
+    e.preventDefault();
+    const sourceStatus = e.dataTransfer.getData("text/column") || draggedColStatus;
+
+    if (draggedTicketId) {
+      handleDropOnColumn(e, targetStatus);
+      return;
+    }
+
+    if (sourceStatus && sourceStatus !== targetStatus) {
+      const nextOrdered = [...orderedStatuses].filter(s => s !== sourceStatus);
+      const tgtIdx = orderedStatuses.indexOf(targetStatus);
+      nextOrdered.splice(tgtIdx, 0, sourceStatus);
+      
+      setOrderedStatuses(nextOrdered);
+
+      if (currentWorkspace) {
+        apiRequest(`/workspaces/${currentWorkspace.slug}/status-order`, "PUT", {
+          status_order: nextOrdered
+        }).catch(err => console.error("Gagal menyimpan urutan kolom:", err));
+      }
+    }
+
+    setDraggedColStatus(null);
+    setDragOverColStatus(null);
   };
 
   // Add Ticket inside a Column
@@ -286,33 +435,53 @@ export default function TicketsKanbanPage() {
   };
 
   const handleAddStatusColumn = () => {
-    if (!newStatusName.trim()) return;
-    setCustomStatuses(prev => Array.from(new Set([...prev, newStatusName.trim()])));
+    if (!newStatusName.trim() || !currentWorkspace) return;
+    const name = newStatusName.trim();
+
+    if (orderedStatuses.includes(name)) {
+      alert("Status ini sudah ada.");
+      return;
+    }
+
+    const nextOrdered = [...orderedStatuses, name];
+    setCustomStatuses(prev => Array.from(new Set([...prev, name])));
     setNewStatusName("");
     setIsAddingStatus(false);
+
+    apiRequest(`/workspaces/${currentWorkspace.slug}/status-order`, "PUT", {
+      status_order: nextOrdered
+    }).catch(err => {
+      console.error("Gagal menyimpan status kolom baru:", err.message);
+      alert("Gagal menyimpan kolom status baru ke database: " + err.message);
+    });
   };
 
-  // Columns definition (Dynamic)
-  const defaultCols = ["Open", "In Progress", "Closed"];
-  const columnStatuses = Array.from(new Set([...defaultCols, ...customStatuses, ...tickets.map(t => t.status)]));
-  
-  const columns = columnStatuses.map(status => {
+  // Columns definition (Dynamic based on drag-and-drop order)
+  const columns = orderedStatuses.map(status => {
     let label = status;
     let desc = `Tiket dengan status ${status}`;
-    let color = "border-purple-500 text-purple-400";
+    let color = "#A855F7"; // Default purple hex
     
     if (status === "Open" || status === "Todo") {
       label = "Open";
       desc = "Tiket belum dikerjakan";
-      color = "border-zinc-500 text-zinc-400";
+      color = "#71717A"; // Default zinc grey hex
     } else if (status === "In Progress") {
       label = "In Progress";
       desc = "Sedang dikerjakan oleh tim";
-      color = "border-yellow-600 text-yellow-500";
+      color = "#EAB308"; // Default yellow hex
     } else if (status === "Closed" || status === "Resolved" || status === "Done") {
       label = "Closed";
       desc = "Tiket selesai dikerjakan";
-      color = "border-emerald-600 text-emerald-500";
+      color = "#10B981"; // Default emerald green hex
+    }
+
+    // Override with custom metadata from localStorage if present
+    const meta = columnsMeta[status];
+    if (meta) {
+      if (meta.label) label = meta.label;
+      if (meta.desc) desc = meta.desc;
+      if (meta.color) color = meta.color;
     }
     
     return { status, label, desc, color };
@@ -337,7 +506,7 @@ export default function TicketsKanbanPage() {
 
 
   return (
-    <div className="flex flex-col w-full text-left font-sans text-zinc-300">
+    <div className="flex flex-col w-full h-[calc(100vh-96px)] md:h-[calc(100vh-128px)] text-left font-sans text-zinc-300">
       
       {error ? (
         <div className="bg-secondary-panel rounded-lg border border-red-500/20 p-8 shadow-2xl flex flex-col items-center gap-5 text-center my-12 max-w-xl mx-auto w-full animate-in fade-in duration-200">
@@ -366,26 +535,17 @@ export default function TicketsKanbanPage() {
               <span className="text-sm font-bold text-zinc-100">{currentWorkspace?.name || "Workspace"}</span>
             </div>
         <div className="flex items-center gap-2 text-xs">
-          <button className="px-3 py-1.5 rounded bg-secondary-panel border border-secondary-border hover:bg-zinc-800 text-zinc-200 transition-colors font-medium">
-            Add status update
-          </button>
-          <button className="px-3 py-1.5 rounded bg-secondary-panel border border-secondary-border hover:bg-zinc-800 text-zinc-200 transition-colors font-medium flex items-center gap-1.5">
-            <TrendingUp className="h-3.5 w-3.5" />
-            Insights
-          </button>
-          <button className="px-3 py-1.5 rounded bg-secondary-panel border border-secondary-border hover:bg-zinc-800 text-zinc-200 transition-colors font-medium flex items-center gap-1.5">
-            <Workflow className="h-3.5 w-3.5" />
-            Workflows <span className="bg-zinc-800 px-1.5 py-0.5 rounded font-mono font-bold text-[10px] ml-0.5">6</span>
-          </button>
-          <button className="p-1.5 rounded bg-secondary-panel border border-secondary-border hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors">
+          <button className="p-1.5 rounded bg-secondary-panel border border-secondary-border hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer">
             <MoreHorizontal className="h-4 w-4" />
           </button>
         </div>
       </div>
 
-      {/* 2. View Navigation Tabs (List, Board, Roadmap) */}
-      <div className="flex items-center border-b border-secondary-border">
-        <div className="flex items-center">
+      {/* 2. Unified Tab + Filter + Action Row */}
+      <div className="flex items-center border-b border-secondary-border bg-secondary-panel/10 gap-0 pr-2">
+        
+        {/* View Tabs */}
+        <div className="flex items-center shrink-0">
           <button 
             onClick={() => setActiveTab("View 1")}
             className={`flex items-center gap-1.5 px-4 py-3 text-xs font-semibold border-b-2 transition-all ${activeTab === "View 1" ? "border-accent-orange text-zinc-100 bg-secondary-panel/20" : "border-transparent text-secondary-text hover:text-zinc-200"}`}
@@ -408,97 +568,139 @@ export default function TicketsKanbanPage() {
             Roadmap
           </button>
         </div>
-      </div>
 
-      {/* 3. Search and View Options Row */}
-      <div className="py-3 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3 flex-grow max-w-xl">
-          <div className="relative flex items-center bg-secondary-panel border border-secondary-border rounded px-3 py-1 flex-1 focus-within:border-accent-orange transition-all">
-            <Search className="h-3.5 w-3.5 text-zinc-500 mr-2" />
-            <input
-              type="text"
-              placeholder="Filter by keyword or by field"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-transparent text-xs text-zinc-100 placeholder-zinc-600 focus:outline-none py-1"
-            />
-          </div>
+        {/* Vertical Divider */}
+        <div className="w-px h-4 bg-secondary-border/60 mx-3 shrink-0" />
 
-          {/* Dropdown Pemilih Layanan Aduan */}
-          <div className="relative">
-            <button
-              onClick={() => setIsAduanDropdownOpen(!isAduanDropdownOpen)}
-              className="px-3 py-2 rounded bg-secondary-panel border border-secondary-border hover:bg-zinc-800 text-zinc-200 text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap"
-            >
-              <Layers className="h-3.5 w-3.5 text-accent-orange" />
-              <span>{getSelectedAduanLabel()}</span>
-              <ChevronDown className="h-3 w-3 text-zinc-500" />
-            </button>
-            {isAduanDropdownOpen && (
-              <div className="absolute left-0 sm:left-auto sm:right-0 mt-1.5 w-64 bg-secondary-panel border border-secondary-border rounded shadow-xl z-50 py-1 font-sans text-xs">
-                <button
-                  onClick={() => {
-                    setSelectedAduanId("all");
-                    setIsAduanDropdownOpen(false);
-                  }}
-                  className={`w-full text-left px-3 py-2 hover:bg-primary-base/50 flex items-center justify-between cursor-pointer ${selectedAduanId === "all" ? "text-accent-orange font-bold" : "text-zinc-300"}`}
-                >
-                  Semua Saluran Aduan
-                </button>
-                <button
-                  onClick={() => {
-                    setSelectedAduanId("none");
-                    setIsAduanDropdownOpen(false);
-                  }}
-                  className={`w-full text-left px-3 py-2 hover:bg-primary-base/50 flex items-center justify-between cursor-pointer ${selectedAduanId === "none" ? "text-accent-orange font-bold" : "text-zinc-300"}`}
-                >
-                  Tiket Internal / Tanpa Saluran
-                </button>
-                <div className="border-t border-secondary-border/50 my-1" />
-                {aduanServices.length === 0 ? (
-                  <div className="px-3 py-2 text-zinc-500 italic text-center">Tidak ada saluran aduan aktif</div>
-                ) : (
-                  aduanServices.map(service => (
-                    <button
-                      key={service.id}
-                      onClick={() => {
-                        setSelectedAduanId(service.id);
-                        setIsAduanDropdownOpen(false);
-                      }}
-                      className={`w-full text-left px-3 py-2 hover:bg-primary-base/50 flex flex-col gap-0.5 cursor-pointer ${selectedAduanId === service.id ? "text-accent-orange font-bold" : "text-zinc-300"}`}
-                    >
-                      <span className="truncate">{service.name}</span>
-                      <span className="text-[9px] text-zinc-500 font-normal truncate">{service.description || "Tidak ada deskripsi"}</span>
-                    </button>
-                  ))
-                )}
-              </div>
-            )}
-          </div>
+        {/* Search Input */}
+        <div className="relative flex items-center bg-secondary-panel border border-secondary-border rounded px-3 py-1 flex-1 min-w-0 max-w-xs focus-within:border-accent-orange transition-all my-2">
+          <Search className="h-3.5 w-3.5 text-zinc-500 mr-2 shrink-0" />
+          <input
+            type="text"
+            placeholder="Filter by keyword or by field"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full bg-transparent text-xs text-zinc-100 placeholder-zinc-600 focus:outline-none py-0.5"
+          />
         </div>
-        <button className="px-3 py-1.5 rounded bg-secondary-panel border border-secondary-border hover:bg-zinc-800 text-zinc-200 text-xs font-medium flex items-center gap-1.5 shrink-0">
-          <SlidersHorizontal className="h-3.5 w-3.5 text-zinc-500" />
-          View
+
+        {/* Aduan Channel Dropdown */}
+        <div className="relative ml-2 shrink-0">
+          <button
+            onClick={() => setIsAduanDropdownOpen(!isAduanDropdownOpen)}
+            className="px-3 py-1.5 rounded bg-secondary-panel border border-secondary-border hover:bg-zinc-800 text-zinc-200 text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap"
+          >
+            <Layers className="h-3.5 w-3.5 text-accent-orange" />
+            <span>{getSelectedAduanLabel()}</span>
+            <ChevronDown className="h-3 w-3 text-zinc-500" />
+          </button>
+          {isAduanDropdownOpen && (
+            <div className="absolute left-0 sm:left-auto sm:right-0 mt-1.5 w-64 bg-secondary-panel border border-secondary-border rounded shadow-xl z-50 py-1 font-sans text-xs">
+              <button
+                onClick={() => {
+                  setSelectedAduanId("all");
+                  setIsAduanDropdownOpen(false);
+                }}
+                className={`w-full text-left px-3 py-2 hover:bg-primary-base/50 flex items-center justify-between cursor-pointer ${selectedAduanId === "all" ? "text-accent-orange font-bold" : "text-zinc-300"}`}
+              >
+                Semua Saluran Aduan
+              </button>
+              <button
+                onClick={() => {
+                  setSelectedAduanId("none");
+                  setIsAduanDropdownOpen(false);
+                }}
+                className={`w-full text-left px-3 py-2 hover:bg-primary-base/50 flex items-center justify-between cursor-pointer ${selectedAduanId === "none" ? "text-accent-orange font-bold" : "text-zinc-300"}`}
+              >
+                Tiket Internal / Tanpa Saluran
+              </button>
+              <div className="border-t border-secondary-border/50 my-1" />
+              {aduanServices.length === 0 ? (
+                <div className="px-3 py-2 text-zinc-500 italic text-center">Tidak ada saluran aduan aktif</div>
+              ) : (
+                aduanServices.map(service => (
+                  <button
+                    key={service.id}
+                    onClick={() => {
+                      setSelectedAduanId(service.id);
+                      setIsAduanDropdownOpen(false);
+                    }}
+                    className={`w-full text-left px-3 py-2 hover:bg-primary-base/50 flex flex-col gap-0.5 cursor-pointer ${selectedAduanId === service.id ? "text-accent-orange font-bold" : "text-zinc-300"}`}
+                  >
+                    <span className="truncate">{service.name}</span>
+                    <span className="text-[9px] text-zinc-500 font-normal truncate">{service.description || "Tidak ada deskripsi"}</span>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Spacer */}
+        <div className="flex-1" />
+
+        {/* Tambah Kontainer Button */}
+        <button 
+          onClick={handleOpenAddContainer}
+          className="px-3 py-1.5 rounded bg-secondary-panel border border-secondary-border hover:border-zinc-700 hover:text-zinc-100 text-zinc-200 text-xs font-medium flex items-center gap-1.5 shrink-0 cursor-pointer active:scale-[0.98] transition-all"
+        >
+          <Plus className="h-3.5 w-3.5 text-accent-orange" />
+          Tambah Kontainer
         </button>
       </div>
 
+
       {/* 4. Kanban Columns Container */}
       {activeTab === "View 2" && (
-        <div className="flex gap-4 overflow-x-auto pb-6 items-start mt-2">
-          {columns.map(col => {
+        <div 
+          ref={columnsContainerRef}
+          className={`flex-1 min-h-0 flex gap-4 overflow-x-auto pb-2 items-stretch mt-2 transition-all duration-300 ${
+            draggedColStatus ? "pr-[340px]" : "pr-4"
+          }`}
+        >
+          {columns.map((col, colIdx) => {
             const colTickets = filteredTickets.filter(t => t.status === col.status);
+            const hoverIndex = colTickets.findIndex(t => t.id === dragOverTicketId);
+            const hoverColIndex = orderedStatuses.indexOf(dragOverColStatus || "");
+            const shouldTranslateCol = draggedColStatus && hoverColIndex !== -1 && colIdx >= hoverColIndex && col.status !== draggedColStatus;
 
-          return (
-            <div 
-              key={col.status}
-              onDragOver={handleDragOver}
-              onDrop={(e) => handleDropOnColumn(e, col.status)}
-              className="w-80 shrink-0 bg-secondary-panel rounded-lg border border-secondary-border p-3 flex flex-col gap-2 min-h-[450px]"
-            >
+            return (
+              <div
+                key={col.status}
+                onDragOver={(e) => handleDragOverCol(e, col.status)}
+                onDragLeave={handleDragLeaveCol}
+                onDrop={(e) => handleDropCol(e, col.status)}
+                className="relative shrink-0 h-full"
+              >
+                {/* Visual column placeholder */}
+                {dragOverColStatus === col.status && (
+                  <div 
+                    className="absolute top-0 bottom-0 left-0 border-2 border-dashed border-accent-orange/40 rounded-lg bg-accent-orange/5 pointer-events-none animate-in fade-in duration-200"
+                    style={{ width: "320px" }}
+                  />
+                )}
+
+                <div 
+                  draggable
+                  onDragStart={(e) => handleDragStartCol(e, col.status)}
+                  onDragEnd={handleDragEndCol}
+                  style={{
+                    transform: shouldTranslateCol ? "translateX(336px)" : "translateX(0px)",
+                    transition: "transform 0.3s ease-in-out",
+                  }}
+                  className={`w-80 bg-secondary-panel rounded-lg border p-3 flex flex-col gap-2 h-full min-h-[350px] ${
+                    draggedColStatus === col.status
+                      ? "border-dashed border-zinc-800 bg-secondary-panel/30 opacity-35 scale-[0.98] select-none shadow-none cursor-grabbing"
+                      : "border-secondary-border"
+                  }`}
+                >
               {/* Column Header */}
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <span className={`w-2.5 h-2.5 rounded-full border-2 ${col.color.split(" ")[0]}`} />
+                  <span 
+                    className="w-2.5 h-2.5 rounded-full border-2" 
+                    style={{ borderColor: col.color }} 
+                  />
                   <h3 className="text-xs font-bold text-zinc-100">{col.label}</h3>
                   <span className="bg-zinc-800/80 px-1.5 py-0.5 rounded-full text-[10px] font-bold font-mono">
                     {colTickets.length}
@@ -512,9 +714,37 @@ export default function TicketsKanbanPage() {
                   >
                     <Plus className="h-3.5 w-3.5" />
                   </button>
-                  <button className="p-1 rounded hover:bg-zinc-800 text-zinc-500 hover:text-zinc-200">
-                    <MoreHorizontal className="h-3.5 w-3.5" />
-                  </button>
+                  <div className="relative">
+                    <button 
+                      onClick={() => setActiveColMenu(activeColMenu === col.status ? null : col.status)}
+                      className="p-1 rounded hover:bg-zinc-800 text-zinc-500 hover:text-zinc-200 cursor-pointer"
+                    >
+                      <MoreHorizontal className="h-3.5 w-3.5" />
+                    </button>
+                    
+                    {activeColMenu === col.status && (
+                      <>
+                        <div 
+                          className="fixed inset-0 z-10" 
+                          onClick={() => setActiveColMenu(null)}
+                        />
+                        <div className="absolute right-0 mt-1 w-36 bg-zinc-900 border border-secondary-border rounded shadow-xl py-1 z-20 animate-in fade-in slide-in-from-top-1 duration-150 text-left">
+                          <button
+                            onClick={() => {
+                              setEditingColStatus(col.status);
+                              setEditingColName(col.status);
+                              setEditingColDesc(col.desc);
+                              setEditingColColor(col.color);
+                              setActiveColMenu(null);
+                            }}
+                            className="w-full text-left px-3 py-2 text-xs text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800 transition-colors flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <span>Edit Kontainer</span>
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -553,73 +783,118 @@ export default function TicketsKanbanPage() {
 
               {/* Ticket Cards List */}
               <div 
-                onDragOver={handleDragOver}
-                onDrop={(e) => handleDropOnColumn(e, col.status)}
-                className="flex flex-col gap-2 mt-2 flex-grow overflow-y-auto min-h-[150px]"
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  if (draggedTicketId) {
+                    setDragOverColForCard(col.status);
+                  }
+                }}
+                onDragLeave={() => {
+                  setDragOverColForCard(null);
+                }}
+                onDrop={(e) => {
+                  handleDropOnColumn(e, col.status);
+                  setDragOverColForCard(null);
+                }}
+                className={`flex flex-col gap-2 mt-2 flex-grow overflow-y-auto min-h-[150px] relative transition-all duration-300 ${
+                  draggedTicketId && dragOverColForCard === col.status ? "pb-[130px]" : "pb-2"
+                }`}
               >
                 {colTickets.length > 0 ? (
-                  colTickets.map(ticket => (
-                    <div
-                      key={ticket.id}
-                      draggable
-                      onDragStart={(e) => handleDragStart(e, ticket.id)}
-                      onDragEnd={handleDragEnd}
-                      onDragOver={(e) => handleDragOverCard(e, ticket.id)}
-                      onDragLeave={handleDragLeaveCard}
-                      onDrop={(e) => handleDropOnCard(e, ticket.id)}
-                      onClick={() => setSelectedTicket(ticket)}
-                      className={`p-3 bg-primary-base rounded-md border transition-all duration-150 cursor-grab active:cursor-grabbing text-left flex flex-col gap-2 shadow shadow-black/20 group resize overflow-auto min-h-[100px] min-w-[200px] max-w-full ${
-                        dragOverTicketId === ticket.id ? "border-accent-orange border-t-4" : "border-secondary-border hover:border-zinc-600"
-                      }`}
-                    >
-                      <div className={`flex flex-col gap-2 h-full w-full ${draggedTicketId ? "pointer-events-none" : ""}`}>
-                        {/* Check icon & Creator tag */}
-                        <div className="flex items-center gap-1.5">
-                          {ticket.status === "Done" ? (
-                            <CheckCircle2 className="h-3.5 w-3.5 text-purple-400 shrink-0" />
-                          ) : (
-                            <Circle className="h-3.5 w-3.5 text-zinc-600 shrink-0" />
-                          )}
-                          <span className="text-[10px] text-zinc-500 font-mono">
-                            {ticket.creator} #{ticket.number}
-                          </span>
-                        </div>
+                  colTickets.map((ticket, index) => {
+                    const shouldTranslate = draggedTicketId && hoverIndex !== -1 && index >= hoverIndex && ticket.id !== draggedTicketId;
+                    return (
+                      <div
+                        key={ticket.id}
+                        onDragOver={(e) => handleDragOverCard(e, ticket.id)}
+                        onDragLeave={handleDragLeaveCard}
+                        onDrop={(e) => handleDropOnCard(e, ticket.id)}
+                        className="relative"
+                      >
+                        {/* Visual placeholder inside the opened space */}
+                        {dragOverTicketId === ticket.id && (
+                          <div 
+                            className="absolute top-0 left-0 right-0 border-2 border-dashed border-accent-orange/40 rounded-md bg-accent-orange/5 pointer-events-none animate-in fade-in duration-200"
+                            style={{ height: "108px" }}
+                          />
+                        )}
                         
-                        {/* Title */}
-                        <h4 className="text-xs font-semibold text-zinc-200 leading-snug line-clamp-2 group-hover:text-accent-orange transition-colors">
-                          {ticket.title}
-                        </h4>
+                        <div
+                          draggable
+                          onDragStart={(e) => handleDragStart(e, ticket.id)}
+                          onDragEnd={handleDragEnd}
+                          onClick={() => setSelectedTicket(ticket)}
+                          style={{
+                            transform: shouldTranslate ? "translateY(116px)" : "translateY(0px)",
+                            transition: "transform 0.3s ease-in-out",
+                          }}
+                          className={`p-3 rounded-md border text-left flex flex-col gap-2 resize overflow-auto min-h-[100px] min-w-[200px] max-w-full ${
+                            draggedTicketId === ticket.id
+                              ? "border-dashed border-zinc-800 bg-secondary-panel/30 opacity-35 scale-[0.98] select-none shadow-none cursor-grabbing"
+                              : "bg-primary-base border-secondary-border hover:border-zinc-600 cursor-grab active:cursor-grabbing shadow shadow-black/20 group"
+                          }`}
+                        >
+                          <div className={`flex flex-col gap-2 h-full w-full ${draggedTicketId ? "pointer-events-none" : ""}`}>
+                            {/* Check icon & Creator tag */}
+                            <div className="flex items-center gap-1.5">
+                              {ticket.status === "Done" ? (
+                                <CheckCircle2 className="h-3.5 w-3.5 text-purple-400 shrink-0" />
+                              ) : (
+                                <Circle className="h-3.5 w-3.5 text-zinc-600 shrink-0" />
+                              )}
+                              <span className="text-[10px] text-zinc-500 font-mono">
+                                {ticket.creator} #{ticket.number}
+                              </span>
+                            </div>
+                            
+                            {/* Title */}
+                            <h4 className="text-xs font-semibold text-zinc-200 leading-snug line-clamp-2 group-hover:text-accent-orange transition-colors">
+                              {ticket.title}
+                            </h4>
 
-                        {/* Bottom row: Priority & Assignee Initials */}
-                        <div className="flex justify-between items-center mt-1 border-t border-secondary-border/30 pt-2">
-                          <span className={`text-[8px] px-1 rounded font-mono font-bold border ${
-                            ticket.priority === "Urgent" ? "text-red-500 bg-red-500/10 border-red-500/20" :
-                            ticket.priority === "High" ? "text-accent-orange bg-accent-orange/10 border-accent-orange/20" :
-                            ticket.priority === "Medium" ? "text-yellow-500 bg-yellow-500/10 border-yellow-500/20" :
-                            "text-zinc-500 bg-zinc-500/10 border-zinc-500/20"
-                          }`}>
-                            {ticket.priority}
-                          </span>
-                          
-                          <div className="w-5 h-5 rounded-full bg-secondary-panel border border-secondary-border flex items-center justify-center text-[9px] font-bold text-zinc-400" title={`Petugas: ${ticket.assignee}`}>
-                            {ticket.assignee.substring(0, 1)}
+                            {/* Bottom row: Priority & Assignee Initials */}
+                            <div className="flex justify-between items-center mt-1 border-t border-secondary-border/30 pt-2">
+                              <span className={`text-[8px] px-1 rounded font-mono font-bold border ${
+                                ticket.priority === "Urgent" ? "text-red-500 bg-red-500/10 border-red-500/20" :
+                                ticket.priority === "High" ? "text-accent-orange bg-accent-orange/10 border-accent-orange/20" :
+                                ticket.priority === "Medium" ? "text-yellow-500 bg-yellow-500/10 border-yellow-500/20" :
+                                "text-zinc-500 bg-zinc-500/10 border-zinc-500/20"
+                              }`}>
+                                {ticket.priority}
+                              </span>
+                              
+                              <div className="w-5 h-5 rounded-full bg-secondary-panel border border-secondary-border flex items-center justify-center text-[9px] font-bold text-zinc-400" title={`Petugas: ${ticket.assignee}`}>
+                                {ticket.assignee.substring(0, 1)}
+                              </div>
+                            </div>
                           </div>
                         </div>
                       </div>
-                    </div>
-                  ))
+                    );
+                  })
                 ) : (
-                  <div className="py-8 text-center text-[10px] text-zinc-600 border border-dashed border-secondary-border rounded-md">
-                    No items in this column
+                  dragOverColForCard !== col.status && (
+                    <div className="py-8 text-center text-[10px] text-zinc-600 border border-dashed border-secondary-border rounded-md">
+                      No items in this column
+                    </div>
+                  )
+                )}
+
+                {/* Visual placeholder at the bottom if dragging over column background/empty area */}
+                {dragOverColForCard === col.status && !dragOverTicketId && (
+                  <div className="relative transition-all duration-300 ease-in-out h-[116px] w-full shrink-0">
+                    <div 
+                      className="border-2 border-dashed border-accent-orange/40 rounded-md bg-accent-orange/5 pointer-events-none animate-in fade-in duration-200"
+                      style={{ height: "108px" }}
+                    />
                   </div>
                 )}
               </div>
-
             </div>
-          );
-        })}
+          </div>
+        );
+      })}
 
-        {/* Add column placeholder */}
         {isAddingStatus ? (
           <div className="w-64 shrink-0 bg-secondary-panel rounded-lg border border-secondary-border p-3 flex flex-col gap-2">
             <h3 className="text-xs font-bold text-zinc-100">Status Baru</h3>
@@ -661,68 +936,11 @@ export default function TicketsKanbanPage() {
       {/* 4.5. List View Table */}
       {activeTab === "View 1" && (
         <div className="bg-secondary-panel border border-secondary-border rounded-lg overflow-hidden shadow-2xl mt-2 animate-in fade-in-50 duration-150 text-left">
-          <div className="overflow-x-auto w-full">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-secondary-border/50 text-[10px] font-bold text-zinc-550 uppercase tracking-wider bg-primary-base/20">
-                  <th className="py-3 px-4 w-28">ID</th>
-                  <th className="py-3 px-4">Judul</th>
-                  <th className="py-3 px-4 w-32">Status</th>
-                  <th className="py-3 px-4 w-32">Prioritas</th>
-                  <th className="py-3 px-4 w-40">Reporter</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-secondary-border/50 text-xs">
-                {filteredTickets.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="py-8 text-center text-zinc-500 italic">
-                      Tidak ada tiket yang ditemukan
-                    </td>
-                  </tr>
-                ) : (
-                  filteredTickets.map(ticket => (
-                    <tr 
-                      key={ticket.id} 
-                      onClick={() => setSelectedTicket(ticket)}
-                      className="hover:bg-primary-base/10 transition-colors cursor-pointer"
-                    >
-                      <td className="py-3.5 px-4 font-mono font-bold text-zinc-400">
-                        {ticket.id}
-                      </td>
-                      <td className="py-3.5 px-4 font-semibold text-zinc-200">
-                        {ticket.title}
-                      </td>
-                      <td className="py-3.5 px-4">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold border ${
-                          ticket.status === "Closed" || ticket.status === "Resolved" || ticket.status === "Done"
-                            ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20"
-                            : ticket.status === "In Progress"
-                            ? "bg-amber-500/10 text-amber-500 border-amber-500/20"
-                            : "bg-zinc-500/10 text-zinc-400 border-zinc-500/20"
-                        }`}>
-                          {ticket.status}
-                        </span>
-                      </td>
-                      <td className="py-3.5 px-4">
-                        <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold border ${
-                          ticket.priority === "Urgent" ? "text-red-500 bg-red-500/10 border-red-500/20" :
-                          ticket.priority === "High" ? "text-accent-orange bg-accent-orange/10 border-accent-orange/20" :
-                          ticket.priority === "Medium" ? "text-yellow-500 bg-yellow-500/10 border-yellow-500/20" :
-                          "text-zinc-500 bg-zinc-500/10 border-zinc-500/20"
-                        }`}>
-                          <span className="w-1.5 h-1.5 rounded-full bg-current" />
-                          {ticket.priority}
-                        </span>
-                      </td>
-                      <td className="py-3.5 px-4 text-zinc-500 font-mono text-[10px]">
-                        {ticket.creator}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+          <ReusableTableComponent 
+            tickets={filteredTickets} 
+            onRowClick={(ticket) => setSelectedTicket(ticket as any)} 
+            extraColumn="reporter" 
+          />
         </div>
       )}
 
@@ -828,25 +1046,21 @@ export default function TicketsKanbanPage() {
 
                   {/* Rows mapping tickets */}
                   {filteredTickets.map((ticket, idx) => {
-                    let startIndex = 10;
-                    let duration = 6;
+                    const startTimelineDate = new Date(2026, 5, 29); // June 29
+                    const ticketDate = new Date(ticket.createdAt);
+                    const diffTime = ticketDate.getTime() - startTimelineDate.getTime();
+                    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
                     
-                    if (idx === 0) {
-                      startIndex = 10; // July 9
-                      duration = 8;
-                    } else if (idx === 1) {
-                      startIndex = 13; // July 12
-                      duration = 12; // crosses July 18!
-                    } else if (idx === 2) {
-                      startIndex = 18; // July 17
-                      duration = 5;
-                    } else if (idx === 3) {
-                      startIndex = 21; // July 20
-                      duration = 7;
-                    } else {
-                      startIndex = (15 + (idx * 3)) % 28;
-                      duration = 4 + (idx % 5);
-                    }
+                    let startIndex = diffDays >= 0 ? diffDays : 0;
+                    startIndex = Math.min(Math.max(0, startIndex), 37);
+                    
+                    let duration = 7;
+                    if (ticket.priority === "Urgent") duration = 2;
+                    else if (ticket.priority === "High") duration = 4;
+                    else if (ticket.priority === "Medium") duration = 7;
+                    else if (ticket.priority === "Low") duration = 10;
+                    
+                    duration = Math.min(duration, 39 - startIndex);
 
                     const barLeft = (startIndex / 39) * 100;
                     const barWidth = (duration / 39) * 100;
@@ -942,7 +1156,7 @@ export default function TicketsKanbanPage() {
                   onChange={(e) => handleStatusChange(selectedTicket.id, e.target.value)}
                   className="col-span-2 bg-primary-base border border-secondary-border text-xs rounded p-2 text-zinc-200 focus:outline-none focus:border-accent-orange cursor-pointer"
                 >
-                  {columnStatuses.map(statusName => (
+                  {orderedStatuses.map(statusName => (
                     <option key={statusName} value={statusName}>{statusName}</option>
                   ))}
                 </select>
@@ -973,13 +1187,31 @@ export default function TicketsKanbanPage() {
               <div className="grid grid-cols-3 items-center">
                 <span className="text-zinc-500 font-medium">Assignee</span>
                 <select
-                  value={selectedTicket.assignee}
-                  onChange={(e) => setTickets(tickets.map(t => t.id === selectedTicket.id ? { ...t, assignee: e.target.value } : t))}
+                  value={selectedTicket.assigneeId || ""}
+                  onChange={async (e) => {
+                    const val = e.target.value || null;
+                    const member = workspaceMembers.find(m => m.id === val);
+                    const name = member ? member.name : "Belum Ditugaskan";
+                    
+                    // Optimistic update
+                    setTickets(tickets.map(t => t.id === selectedTicket.id ? { ...t, assigneeId: val, assignee: name } : t));
+                    setSelectedTicket(prev => prev ? { ...prev, assigneeId: val, assignee: name } : null);
+                    
+                    try {
+                      await apiRequest(`/workspaces/${currentWorkspace.slug}/tickets/${selectedTicket.rawId}`, "PUT", {
+                        assignee_id: val
+                      });
+                    } catch (err: any) {
+                      alert("Gagal memperbarui petugas: " + err.message);
+                      fetchTickets(currentWorkspace.slug);
+                    }
+                  }}
                   className="col-span-2 bg-primary-base border border-secondary-border text-xs rounded p-2 text-zinc-200 focus:outline-none focus:border-accent-orange cursor-pointer"
                 >
-                  <option value="Rian">Rian</option>
-                  <option value="Sarah">Sarah</option>
-                  <option value="Alex">Alex</option>
+                  <option value="">Belum Ditugaskan</option>
+                  {workspaceMembers.map(m => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
                 </select>
               </div>
 
@@ -1006,6 +1238,177 @@ export default function TicketsKanbanPage() {
         </div>
       )}
         </>
+      )}
+
+      {/* Edit Container (Status Column) Modal */}
+      {editingColStatus && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="bg-secondary-panel border border-secondary-border rounded-xl shadow-2xl p-6 w-full max-w-sm flex flex-col gap-4 animate-in zoom-in-95 duration-200 text-left">
+            
+            <div className="flex flex-col gap-1">
+              <h3 className="text-sm font-bold text-zinc-100 flex items-center gap-1.5">
+                Edit Kontainer
+              </h3>
+              <p className="text-[11px] text-secondary-text leading-relaxed">
+                Ubah nama kolom, deskripsi, dan warna indikator status kartu ini pada papan Kanban.
+              </p>
+            </div>
+
+            <div className="border-t border-secondary-border/50 my-1" />
+
+            {/* Container Name */}
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="colNameInput" className="text-[11px] font-semibold text-zinc-400">
+                Nama Kontainer
+              </label>
+              <input
+                id="colNameInput"
+                type="text"
+                required
+                value={editingColName}
+                onChange={(e) => setEditingColName(e.target.value)}
+                placeholder="Misal: Review"
+                className="bg-primary-base border border-secondary-border text-xs rounded p-2.5 text-zinc-100 placeholder-zinc-700 focus:outline-none focus:border-accent-orange w-full"
+                autoFocus
+              />
+            </div>
+
+            {/* Container Description */}
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="colDescInput" className="text-[11px] font-semibold text-zinc-400">
+                Deskripsi Kontainer
+              </label>
+              <textarea
+                id="colDescInput"
+                value={editingColDesc}
+                onChange={(e) => setEditingColDesc(e.target.value)}
+                placeholder="Deskripsi tugas kolom ini..."
+                rows={2}
+                className="bg-primary-base border border-secondary-border text-xs rounded p-2.5 text-zinc-100 placeholder-zinc-700 focus:outline-none focus:border-accent-orange w-full resize-none"
+              />
+            </div>
+
+            {/* Indicator Color */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[11px] font-semibold text-zinc-400">
+                Warna Indikator
+              </label>
+              <div className="flex items-center gap-2.5">
+                <input
+                  type="color"
+                  value={editingColColor}
+                  onChange={(e) => setEditingColColor(e.target.value)}
+                  className="w-9 h-9 rounded border border-secondary-border cursor-pointer bg-transparent p-0.5"
+                />
+                <input
+                  type="text"
+                  value={editingColColor}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val.startsWith("#") && val.length <= 7) {
+                      setEditingColColor(val);
+                    } else if (!val.startsWith("#") && val.length <= 6) {
+                      setEditingColColor("#" + val);
+                    }
+                  }}
+                  placeholder="#Hex"
+                  maxLength={7}
+                  className="bg-primary-base border border-secondary-border text-xs rounded p-2.5 text-zinc-100 placeholder-zinc-700 w-28 text-center font-mono focus:outline-none focus:border-accent-orange"
+                />
+              </div>
+            </div>
+
+            <div className="border-t border-secondary-border/50 my-1" />
+
+            <div className="flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setEditingColStatus(null)}
+                className="px-3.5 py-2 text-xs font-bold text-zinc-400 hover:text-zinc-200 transition-colors"
+                disabled={isLoading}
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  const newName = editingColName.trim();
+                  if (!newName) return;
+
+                  setIsLoading(true);
+                  try {
+                    const nextMeta = { ...columnsMeta };
+
+                    if (newName !== editingColStatus) {
+                      // Name changed: rename status column
+                      if (orderedStatuses.includes(newName)) {
+                        alert("Nama status ini sudah digunakan oleh kolom lain.");
+                        setIsLoading(false);
+                        return;
+                      }
+
+                      const ticketsToUpdate = tickets.filter(t => t.status === editingColStatus);
+                      
+                      // 1. Update status order on backend
+                      const nextOrdered = orderedStatuses.map(s => s === editingColStatus ? newName : s);
+                      await apiRequest(`/workspaces/${currentWorkspace.slug}/status-order`, "PUT", {
+                        status_order: nextOrdered
+                      });
+
+                      // 2. Migrate tickets concurrently if there are any
+                      if (ticketsToUpdate.length > 0) {
+                        await Promise.all(
+                          ticketsToUpdate.map(t => 
+                            apiRequest(`/workspaces/${currentWorkspace.slug}/tickets/${t.rawId}`, "PUT", {
+                              status: newName
+                            })
+                          )
+                        );
+                      }
+
+                      // Clean up old meta key
+                      delete nextMeta[editingColStatus];
+                    }
+
+                    // Save new metadata
+                    nextMeta[newName] = {
+                      label: newName,
+                      desc: editingColDesc.trim(),
+                      color: editingColColor
+                    };
+
+                    localStorage.setItem(
+                      `workspace_status_meta_${currentWorkspace.slug}`, 
+                      JSON.stringify(nextMeta)
+                    );
+
+                    // 3. Refresh state in-place without page reload
+                    await fetchTickets(currentWorkspace.slug);
+                    await fetchWorkspaceDetail(currentWorkspace.slug);
+                    const metaStr = localStorage.getItem(`workspace_status_meta_${currentWorkspace.slug}`);
+                    if (metaStr) {
+                      setColumnsMeta(JSON.parse(metaStr));
+                    }
+                  } catch (err: any) {
+                    alert("Gagal memperbarui kontainer: " + err.message);
+                  } finally {
+                    setIsLoading(false);
+                    setEditingColStatus(null);
+                  }
+                }}
+                disabled={isLoading || !editingColName.trim()}
+                className="px-4 py-2 text-xs font-bold text-primary-base bg-accent-orange hover:bg-accent-orange-hover rounded disabled:opacity-50 transition-all active:scale-[0.98] cursor-pointer"
+              >
+                {isLoading ? (
+                  <span className="w-4 h-4 border-2 border-primary-base border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  "Simpan"
+                )}
+              </button>
+            </div>
+
+          </div>
+        </div>
       )}
 
     </div>

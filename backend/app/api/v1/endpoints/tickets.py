@@ -43,7 +43,7 @@ def list_tickets(
             pass
 
     # 2. Query tickets
-    query = db.query(Ticket).filter(Ticket.workspace_id == workspace.id)
+    query = db.query(Ticket).filter(Ticket.workspace_id == workspace.id).order_by(Ticket.position.asc())
     
     # 3. If the user is a Customer, filter to only tickets they created
     if is_customer and logged_in_user_id:
@@ -118,6 +118,46 @@ def create_ticket(
     return db_ticket
 
 
+from pydantic import BaseModel
+from uuid import UUID
+
+class TicketReorder(BaseModel):
+    status: str
+    ticket_ids: List[UUID]
+
+@router.put("/workspaces/{workspace_slug}/tickets/reorder", response_model=Any)
+def reorder_tickets(
+    workspace_slug: str,
+    *,
+    db: Session = Depends(get_db),
+    reorder_in: TicketReorder,
+    current_member: WorkspaceMember = Depends(deps.get_current_workspace_member)
+) -> Any:
+    # Verify current member role
+    if current_member.role not in ["Admin", "Agent"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Only Admins or Agents can reorder tickets."
+        )
+    
+    # Bulk update ticket positions
+    tickets = db.query(Ticket).filter(
+        Ticket.workspace_id == current_member.workspace_id,
+        Ticket.id.in_(reorder_in.ticket_ids)
+    ).all()
+    
+    ticket_map = {ticket.id: ticket for ticket in tickets}
+    
+    for index, ticket_id in enumerate(reorder_in.ticket_ids):
+        if ticket_id in ticket_map:
+            ticket = ticket_map[ticket_id]
+            ticket.status = reorder_in.status
+            ticket.position = index
+            
+    db.commit()
+    return {"status": "success", "message": "Tickets reordered successfully"}
+
+
 @router.put("/workspaces/{workspace_slug}/tickets/{ticket_id}", response_model=TicketSchema)
 def update_ticket(
     workspace_slug: str,
@@ -173,3 +213,5 @@ def delete_ticket(
     db.delete(ticket)
     db.commit()
     return {"status": "success", "message": "Ticket deleted successfully"}
+
+

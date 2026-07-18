@@ -1,11 +1,13 @@
 from pydantic import BaseModel
 from uuid import UUID
 from datetime import datetime
+from typing import List
 
 
 class WorkspaceBase(BaseModel):
     name: str
     slug: str
+    status_order: List[str] | None = None
 
 class WorkspaceCreate(WorkspaceBase):
     pass

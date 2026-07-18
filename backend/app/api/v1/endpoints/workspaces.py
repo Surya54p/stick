@@ -70,9 +70,9 @@ def get_user_workspaces(
         })
     return workspaces
 
-@router.get("/{slug}", response_model=WorkspaceSchema)
+@router.get("/{workspace_slug}", response_model=WorkspaceSchema)
 def get_workspace_by_slug(
-    slug: str,
+    workspace_slug: str,
     db: Session = Depends(get_db),
     current_member: WorkspaceMember = Depends(deps.get_current_workspace_member)
 ) -> Any:
@@ -143,9 +143,9 @@ def accept_invitation(
     }
 
 # Invitation management (scoped to workspace, Admin-only)
-@router.post("/{slug}/invitations", response_model=WorkspaceInvitationSchema)
+@router.post("/{workspace_slug}/invitations", response_model=WorkspaceInvitationSchema)
 def invite_member(
-    slug: str,
+    workspace_slug: str,
     *,
     db: Session = Depends(get_db),
     invite_in: WorkspaceInvitationCreate,
@@ -192,9 +192,9 @@ def invite_member(
     db.refresh(db_invite)
     return db_invite
 
-@router.get("/{slug}/invitations", response_model=List[WorkspaceInvitationSchema])
+@router.get("/{workspace_slug}/invitations", response_model=List[WorkspaceInvitationSchema])
 def list_invitations(
-    slug: str,
+    workspace_slug: str,
     db: Session = Depends(get_db),
     current_member: WorkspaceMember = Depends(deps.get_current_workspace_member)
 ) -> Any:
@@ -209,9 +209,9 @@ def list_invitations(
     ).all()
 
 # Share Tokens for View-Only Guest Access (Admin-only)
-@router.post("/{slug}/share-tokens", response_model=WorkspaceShareTokenSchema)
+@router.post("/{workspace_slug}/share-tokens", response_model=WorkspaceShareTokenSchema)
 def generate_share_token(
-    slug: str,
+    workspace_slug: str,
     *,
     db: Session = Depends(get_db),
     token_in: WorkspaceShareTokenCreate,
@@ -235,9 +235,9 @@ def generate_share_token(
     db.refresh(db_token)
     return db_token
 
-@router.get("/{slug}/share-tokens", response_model=List[WorkspaceShareTokenSchema])
+@router.get("/{workspace_slug}/share-tokens", response_model=List[WorkspaceShareTokenSchema])
 def list_share_tokens(
-    slug: str,
+    workspace_slug: str,
     db: Session = Depends(get_db),
     current_member: WorkspaceMember = Depends(deps.get_current_workspace_member)
 ) -> Any:
@@ -251,9 +251,9 @@ def list_share_tokens(
         WorkspaceShareToken.workspace_id == current_member.workspace_id
     ).all()
 
-@router.put("/{slug}", response_model=WorkspaceSchema)
+@router.put("/{workspace_slug}", response_model=WorkspaceSchema)
 def update_workspace(
-    slug: str,
+    workspace_slug: str,
     *,
     db: Session = Depends(get_db),
     workspace_in: WorkspaceUpdate,
@@ -285,9 +285,9 @@ def update_workspace(
     db.refresh(workspace)
     return workspace
 
-@router.delete("/{slug}", response_model=Any)
+@router.delete("/{workspace_slug}", response_model=Any)
 def delete_workspace(
-    slug: str,
+    workspace_slug: str,
     db: Session = Depends(get_db),
     current_member: WorkspaceMember = Depends(deps.get_current_workspace_member)
 ) -> Any:
@@ -303,9 +303,9 @@ def delete_workspace(
     db.commit()
     return {"status": "success", "message": "Workspace deleted successfully"}
 
-@router.get("/{slug}/members", response_model=List[Any])
+@router.get("/{workspace_slug}/members", response_model=List[Any])
 def list_workspace_members(
-    slug: str,
+    workspace_slug: str,
     db: Session = Depends(get_db),
     current_member: WorkspaceMember = Depends(deps.get_current_workspace_member)
 ) -> Any:
@@ -320,3 +320,28 @@ def list_workspace_members(
             "status": "Active"
         })
     return result
+
+from pydantic import BaseModel
+
+class StatusOrderUpdate(BaseModel):
+    status_order: List[str]
+
+@router.put("/{workspace_slug}/status-order", response_model=WorkspaceSchema)
+def update_workspace_status_order(
+    workspace_slug: str,
+    *,
+    db: Session = Depends(get_db),
+    status_order_in: StatusOrderUpdate,
+    current_member: WorkspaceMember = Depends(deps.get_current_workspace_member)
+) -> Any:
+    if current_member.role not in ["Admin", "Agent"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Only Admins or Agents can update the status column order."
+        )
+    
+    workspace = current_member.workspace
+    workspace.status_order = status_order_in.status_order
+    db.commit()
+    db.refresh(workspace)
+    return workspace
