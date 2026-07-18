@@ -1,0 +1,55 @@
+name: Continuous Integration (CI)
+
+# Pemicu: Jalankan otomatis saat ada PR ke branch main
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  # --- 1. JOB UNTUK FRONTEND (NEXT.JS) ---
+  frontend-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm' # Ganti 'yarn' atau 'pnpm' jika kamu menggunakannya
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Dependencies Frontend
+        run: npm ci
+        working-directory: ./frontend
+
+      - name: Run Next.js Build Check
+        run: npm run build
+        working-directory: ./frontend
+
+  # --- 2. JOB UNTUK BACKEND (FASTAPI) ---
+  backend-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install Dependencies Backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+        working-directory: ./backend
+
+      # (Opsional) Buka tanda komentar jika kamu sudah membuat unit test di FastAPI
+      # - name: Run Backend Tests
+      #   run: pytest
+      #   working-directory: ./backend
