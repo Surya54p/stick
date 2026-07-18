@@ -22,7 +22,3 @@ stick memungkinkan tim atau organisasi membuat **workspace** ticketing mereka se
 | **Backend** | FastAPI (Python) |
 | **Database** | PostgreSQL |
 | **Migrasi DB** | Alembic |
-
-### Desain
-
-Mengusung konsep **"Simple but Sharp"** — antarmuka gelap (dark mode) dengan aksen **Sharp Orange (`#ff6b00`)**, mengikuti proporsi warna **6:3:1** untuk tampilan yang bersih, tajam, dan modern.
